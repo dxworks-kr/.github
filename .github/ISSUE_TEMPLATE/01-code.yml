@@ -1,0 +1,49 @@
+name: "💻 개발 업무"
+description: "기능 개발, 버그 수정, 리팩토링 등 코드 작업"
+title: "[개발] "
+labels: ["type:code"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경 / 목적
+      placeholder: "예: OID4VCI 발급 플로우에서 P-256 키 지원 필요"
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: 작업 내용
+      description: 구체적인 작업 범위. AI 도구에 그대로 전달 가능한 수준으로 작성 권장
+    validations:
+      required: true
+  - type: textarea
+    id: dod
+    attributes:
+      label: 완료 조건 (DoD)
+      value: |
+        - [ ] 구현 완료
+        - [ ] 테스트 통과
+        - [ ] PR 머지 (closes #이슈번호 포함)
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: 작업 브랜치 (규약)
+      description: "feat/{이슈번호}-{설명} 또는 fix/{이슈번호}-{설명}"
+      placeholder: "예: feat/12-p256-key-support"
+    validations:
+      required: false
+  - type: dropdown
+    id: tool
+    attributes:
+      label: 주 사용 AI 도구
+      options:
+        - Claude Code
+        - Claude chat
+        - ChatGPT
+        - Codex
+        - 해당 없음
+    validations:
+      required: false
