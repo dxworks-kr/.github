@@ -1,0 +1,47 @@
+# =============================================================================
+# notify-teams (reusable) — 이슈 생성/클로즈 시 TEAMS(Mattermost) 채널 알림
+# 위치: dxworks-kr/.github/.github/workflows/notify-teams.yml
+# 각 repo의 task-tracking.yml caller가 secrets: inherit로 호출한다.
+#
+# ⏸️ 보류 중 (2026-08-21): org secret DXWORKS_TEAMS_WEBHOOK이 등록될 때까지
+#    아무것도 하지 않고 성공 종료한다. 재개 = secret 등록 한 번이면 끝.
+# =============================================================================
+name: notify-teams
+
+on:
+  workflow_call:
+    secrets:
+      DXWORKS_TEAMS_WEBHOOK:
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mattermost 알림 전송
+        env:
+          WEBHOOK_URL: ${{ secrets.DXWORKS_TEAMS_WEBHOOK }}
+          EVENT_ACTION: ${{ github.event.action }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_ASSIGNEES: ${{ join(github.event.issue.assignees.*.login, ', ') }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "DXWORKS_TEAMS_WEBHOOK 미등록 — TEAMS 알림 보류 중, 건너뜀"
+            exit 0
+          fi
+          case "$EVENT_ACTION" in
+            opened) HEADER="🆕 새 이슈" ;;
+            closed) HEADER="✅ 이슈 완료" ;;
+            *) echo "알림 대상 아님: $EVENT_ACTION"; exit 0 ;;
+          esac
+          ASSIGNEE_PART=""
+          [ -n "$ISSUE_ASSIGNEES" ] && ASSIGNEE_PART=" · 담당: $ISSUE_ASSIGNEES"
+          jq -n \
+            --arg username "DXWORKS 업무봇" \
+            --arg text "$HEADER — [${REPO}#${ISSUE_NUMBER}](${ISSUE_URL}) ${ISSUE_TITLE} (by ${ACTOR}${ASSIGNEE_PART})" \
+            '{username: $username, text: $text}' \
+            | curl -sfS -X POST -H 'Content-Type: application/json' -d @- "$WEBHOOK_URL"
