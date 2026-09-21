@@ -2,6 +2,9 @@
 # board-sync (reusable) — 업무보드(Project #4) 자동 반영
 #   1) 이슈 생성 시 보드 자동 추가 (Free 플랜 auto-add 1개 제약 보완)
 #   2) status:* 라벨 → 보드 Status 컬럼 단방향 동기화 (양방향은 보류 확정)
+#   3) 이슈 클로즈 시 status:* 라벨 전부 제거 (2026-09-21 추가)
+#      닫힌 이슈에 status가 남으면 현황판이 살아 있는 업무로 계속 집계한다.
+#      실측상 사람이 매번 기억해서 떼야 했고 하루에 3건이 누락됐다.
 # 위치: dxworks-kr/.github/.github/workflows/board-sync.yml
 # 각 repo의 task-tracking.yml caller가 secrets: inherit로 호출한다.
 # =============================================================================
@@ -78,3 +81,23 @@ jobs:
             }' -f project="$PROJECT_ID" -f item="$ITEM_ID" \
                -f field="$FIELD_ID" -f option="$OPTION_ID" >/dev/null
           echo "Status → $TARGET 반영 완료"
+
+  clear-status-on-close:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 클로즈된 이슈의 status:* 라벨 제거
+        env:
+          GH_TOKEN: ${{ secrets.DXWORKS_BOT_PAT }}
+          REPO: ${{ github.repository }}
+          NUM: ${{ github.event.issue.number }}
+          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
+        run: |
+          removed=0
+          while read -r l; do
+            [ -z "$l" ] && continue
+            gh issue edit "$NUM" -R "$REPO" --remove-label "$l" >/dev/null && echo "제거: $l"
+            removed=$((removed+1))
+          done < <(jq -r '.[] | select(startswith("status:"))' <<<"$LABELS")
+          [ "$removed" -eq 0 ] && echo "제거할 status 라벨 없음"
+          exit 0
