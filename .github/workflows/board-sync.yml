@@ -1,0 +1,80 @@
+# =============================================================================
+# board-sync (reusable) — 업무보드(Project #4) 자동 반영
+#   1) 이슈 생성 시 보드 자동 추가 (Free 플랜 auto-add 1개 제약 보완)
+#   2) status:* 라벨 → 보드 Status 컬럼 단방향 동기화 (양방향은 보류 확정)
+# 위치: dxworks-kr/.github/.github/workflows/board-sync.yml
+# 각 repo의 task-tracking.yml caller가 secrets: inherit로 호출한다.
+# =============================================================================
+name: board-sync
+
+on:
+  workflow_call:
+    secrets:
+      DXWORKS_BOT_PAT:
+        required: true
+
+env:
+  PROJECT_OWNER: dxworks-kr
+  PROJECT_NUMBER: "4"
+
+jobs:
+  add-to-board:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/orgs/dxworks-kr/projects/4
+          github-token: ${{ secrets.DXWORKS_BOT_PAT }}
+
+  sync-status:
+    if: github.event.action == 'labeled' && startsWith(github.event.label.name, 'status:')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 라벨 → 보드 Status 반영
+        env:
+          GH_TOKEN: ${{ secrets.DXWORKS_BOT_PAT }}
+          LABEL: ${{ github.event.label.name }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+        run: |
+          # status:blocked / status:stale은 보드 컬럼이 없으므로 라벨만 유지한다 (확정 사항)
+          case "$LABEL" in
+            status:in-progress) TARGET="In Progress" ;;
+            status:review)      TARGET="Review" ;;
+            *) echo "매핑되는 보드 컬럼 없음: $LABEL — 건너뜀"; exit 0 ;;
+          esac
+
+          PROJECT_DATA=$(gh api graphql -f query='
+            query($org: String!, $number: Int!) {
+              organization(login: $org) {
+                projectV2(number: $number) {
+                  id
+                  field(name: "Status") {
+                    ... on ProjectV2SingleSelectField { id options { id name } }
+                  }
+                }
+              }
+            }' -f org="$PROJECT_OWNER" -F number="$PROJECT_NUMBER")
+          PROJECT_ID=$(jq -r '.data.organization.projectV2.id' <<<"$PROJECT_DATA")
+          FIELD_ID=$(jq -r '.data.organization.projectV2.field.id' <<<"$PROJECT_DATA")
+          OPTION_ID=$(jq -r --arg n "$TARGET" \
+            '.data.organization.projectV2.field.options[] | select(.name == $n) | .id' <<<"$PROJECT_DATA")
+
+          # 이미 보드에 있으면 기존 아이템을 그대로 돌려주므로 안전(멱등)
+          ITEM_ID=$(gh api graphql -f query='
+            mutation($project: ID!, $content: ID!) {
+              addProjectV2ItemById(input: {projectId: $project, contentId: $content}) {
+                item { id }
+              }
+            }' -f project="$PROJECT_ID" -f content="$ISSUE_NODE_ID" \
+            --jq '.data.addProjectV2ItemById.item.id')
+
+          gh api graphql -f query='
+            mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project, itemId: $item, fieldId: $field,
+                value: {singleSelectOptionId: $option}
+              }) { projectV2Item { id } }
+            }' -f project="$PROJECT_ID" -f item="$ITEM_ID" \
+               -f field="$FIELD_ID" -f option="$OPTION_ID" >/dev/null
+          echo "Status → $TARGET 반영 완료"
